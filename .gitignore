@@ -1,0 +1,21 @@
+# Virtual environments
+.venv/
+venv/
+
+# Private configuration
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Generated logs
+logs/*
+!logs/.gitkeep
+
+# Editors
+.vscode/
+.idea/
