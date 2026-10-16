@@ -19,3 +19,5 @@ logs/*
 # Editors
 .vscode/
 .idea/
+# Tests
+.pytest_cache/

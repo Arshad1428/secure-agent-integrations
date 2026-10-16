@@ -56,7 +56,9 @@ async def connect():
             error = error.exceptions[0]
 
         if isinstance(error, HTTPException):
-            raise error from None
+            # Re-raise the original object. "from None" would erase
+            # its __cause__, which the audit log records.
+            raise error
 
         raise
 
@@ -94,6 +96,7 @@ async def call_tool(
     started = time.perf_counter()
     outcome = "error"
     subject = None
+    reason = None
 
     metric_name = (
         name if name in TOOL_PERMISSIONS else "unknown"
@@ -128,8 +131,9 @@ async def call_tool(
             exclude_none=True,
         )
 
-    except HTTPException:
+    except HTTPException as exc:
         outcome = "denied"
+        reason = getattr(exc, "reason", None) or str(exc.detail)
         raise
 
     finally:
@@ -150,5 +154,6 @@ async def call_tool(
             subject=subject,
             tool=metric_name,
             outcome=outcome,
+            reason=reason,
             duration_ms=round(elapsed * 1000, 2),
         )

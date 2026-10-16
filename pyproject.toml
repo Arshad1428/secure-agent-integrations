@@ -9,5 +9,11 @@ description = "Local AI agent with authenticated MCP tool integrations"
 readme = "README.md"
 requires-python = ">=3.12"
 
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.setuptools.packages.find]
 where = ["src"]

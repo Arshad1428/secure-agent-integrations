@@ -24,3 +24,9 @@ TOOL_DURATION = Histogram(
     "Tool execution duration",
     ["tool"],
 )
+
+AUTH_FAILURES = Counter(
+    "agent_auth_failures_total",
+    "Number of rejected authentication attempts",
+    ["reason"],
+)

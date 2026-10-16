@@ -109,6 +109,7 @@ The local model determines which tools it calls.
 - observability/logging.py: rotating JSON audit logs
 - observability/metrics.py: request and tool metrics
 - scripts/local_identity.py: configuration and token CLI
+- tests/: offline test suite with a fake Ollama server
 
 ## Request flow
 
@@ -172,8 +173,26 @@ tool response. HTTP 200 alone does not mean the tool succeeded.
 
 Audit events are written to logs/audit.jsonl.
 
-Events include request IDs, routes, tool names, identity subjects,
-outcomes, and duration.
+Event types:
+
+| Event | Written when | Notable fields |
+|---|---|---|
+| http_request | every request | route, status, duration_ms, subject, role, reason, cause |
+| auth_failure | a token is missing or rejected | reason, route, client |
+| tool_call | the gateway handles a tool call | subject, tool, outcome, reason, duration_ms |
+| request_error | an unhandled exception occurs | error_type |
+
+subject and role are null when the request was not authenticated.
+reason explains a failed request. For 401 it is one of: missing_token,
+malformed_token, invalid_signature, invalid_algorithm, token_expired,
+invalid_audience, invalid_issuer, missing_claim, invalid_subject,
+invalid_role. For 403 it is missing_permission:<permission>. For
+other failures it is the error message returned to the caller.
+cause is the exception type behind a failure, such as ConnectError
+or ReadTimeout when Ollama is unreachable or slow.
+
+HTTP responses stay generic for authentication failures. The
+specific reason is only written to the audit log and metrics.
 
 Tokens, prompts, tool arguments, and tool result contents are
 excluded from audit records.
@@ -181,6 +200,7 @@ excluded from audit records.
 Logs rotate at 2 MB with three backups.
 
 The /metrics endpoint exposes HTTP and tool counts and duration.
+agent_auth_failures_total counts rejected tokens by reason.
 Metrics reset when the application restarts. Run one API worker.
 
 ## Configuration
@@ -201,13 +221,29 @@ Timeouts apply to backend requests, not to the entire agent operation.
 
 ## Troubleshooting
 
-- 401: token missing, invalid, or expired.
-- 403: the current role lacks permission.
-- 502: check Ollama, model installation, and audit logs.
+- 401: token missing, invalid, or expired. The audit log
+  auth_failure event gives the exact reason.
+- 403: the current role lacks permission. The reason field names
+  the missing permission.
+- 502: check Ollama and model installation. The reason and cause
+  fields of the http_request event show what failed.
 - 504: Ollama exceeded its configured timeout.
 - ModuleNotFoundError: activate .venv and run
   python -m pip install -e .
 - Existing .env: initialization preserves it; edit it manually.
+
+## Tests
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
+The suite needs no Ollama installation. It starts a fake Ollama
+server to exercise the agent loop, covers authentication failures,
+role permissions, gateway enforcement, error mapping, audit
+content, and metrics, and writes audit records to a temporary
+directory. It tests the plumbing, not the quality of a real model.
 
 ## Scope
 

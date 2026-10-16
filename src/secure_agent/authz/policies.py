@@ -1,6 +1,21 @@
 from fastapi import HTTPException
 
 
+class PermissionDenied(HTTPException):
+    """403 carrying the missing permission for audit logs."""
+
+    def __init__(self, permission: str):
+        super().__init__(
+            status_code=403,
+            detail=(
+                "This identity does not have "
+                "the required permission"
+            ),
+        )
+
+        self.reason = f"missing_permission:{permission}"
+
+
 ROLE_PERMISSIONS = {
     "reader": frozenset({
         "tools:read",
@@ -32,10 +47,7 @@ def require_permission(
     )
 
     if permission not in permissions:
-        raise HTTPException(
-            status_code=403,
-            detail="This identity does not have the required permission",
-        )
+        raise PermissionDenied(permission)
 
 
 def permitted_tools(claims: dict) -> set[str]:

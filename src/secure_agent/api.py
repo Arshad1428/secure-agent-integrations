@@ -10,6 +10,7 @@ from fastapi import (
     Request,
     Response,
 )
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
 from fastapi.security import (
     HTTPAuthorizationCredentials,
@@ -18,6 +19,9 @@ from fastapi.security import (
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     generate_latest,
+)
+from starlette.exceptions import (
+    HTTPException as StarletteHTTPException,
 )
 from pydantic import (
     BaseModel,
@@ -34,12 +38,13 @@ from secure_agent.gateway.router import (
     connect,
     list_tools,
 )
-from secure_agent.identity.tokens import verify_token
+from secure_agent.identity.tokens import AuthError, verify_token
 from secure_agent.observability.logging import (
     audit,
     configure_logging,
 )
 from secure_agent.observability.metrics import (
+    AUTH_FAILURES,
     HTTP_DURATION,
     HTTP_REQUESTS,
 )
@@ -62,19 +67,20 @@ bearer = HTTPBearer(auto_error=False)
 
 
 def authenticated(
+    request: Request,
     credentials: Annotated[
         HTTPAuthorizationCredentials | None,
         Depends(bearer),
     ],
 ) -> str:
     if credentials is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Bearer token required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise AuthError("missing_token")
 
-    verify_token(credentials.credentials)
+    claims = verify_token(credentials.credentials)
+
+    # Shared with the audit middleware through the ASGI scope.
+    request.state.subject = claims["sub"]
+    request.state.role = claims["role"]
 
     return credentials.credentials
 
@@ -120,6 +126,9 @@ async def observe_request(request: Request, call_next):
         response = await call_next(request)
 
     except Exception as exc:
+        request.state.error_reason = "unhandled_exception"
+        request.state.error_cause = type(exc).__name__
+
         audit(
             "request_error",
             request_id,
@@ -161,11 +170,55 @@ async def observe_request(request: Request, call_next):
         route=route,
         status=response.status_code,
         duration_ms=round(elapsed * 1000, 2),
+        subject=getattr(request.state, "subject", None),
+        role=getattr(request.state, "role", None),
+        reason=getattr(request.state, "error_reason", None),
+        cause=getattr(request.state, "error_cause", None),
     )
 
     response.headers["X-Request-ID"] = request_id
 
     return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def record_http_error(
+    request: Request,
+    exc: StarletteHTTPException,
+):
+    """Record why a request failed, then return the normal response.
+
+    Only the machine-readable reason, the HTTP status text, and the
+    exception type of the underlying cause are stored. Tokens,
+    prompts, and arguments are never read here.
+    """
+
+    reason = getattr(exc, "reason", None) or str(exc.detail)
+
+    request.state.error_reason = reason
+
+    if exc.__cause__ is not None:
+        request.state.error_cause = type(exc.__cause__).__name__
+
+    if isinstance(exc, AuthError):
+        AUTH_FAILURES.labels(reason=exc.reason).inc()
+
+        audit(
+            "auth_failure",
+            getattr(request.state, "request_id", "unknown"),
+            reason=exc.reason,
+            method=request.method,
+            route=getattr(
+                request.scope.get("route"),
+                "path",
+                "unmatched",
+            ),
+            client=(
+                request.client.host if request.client else None
+            ),
+        )
+
+    return await http_exception_handler(request, exc)
 
 
 @app.get("/health")
