@@ -1,254 +1,168 @@
-# Secure Agent Integrations
+# 🚲 Bike Sharing Demand Prediction
 
-A local AI agent with authenticated MCP tools, gateway routing,
-JWT identities, audit logs, and metrics.
+An end-to-end machine learning pipeline that predicts hourly bike rental demand for the **Capital Bikeshare** program in Washington, D.C., using historical usage patterns, weather conditions, and seasonal/temporal features.
 
-## Technology
+---
 
-- Python 3.12
-- FastAPI
-- Ollama
-- MCP Python SDK v1
-- PyJWT
-- Prometheus client
+## 📌 Project Overview
 
-## Setup — Windows Git Bash
+This project builds a modular, leakage-safe ML pipeline to forecast the total number of bike rentals (`count`) in a given hour. It benchmarks an interpretable linear baseline against a tuned ensemble model (Random Forest), following best practices for preprocessing, cross-validation, and evaluation.
 
-Run from the project root:
+---
 
+## 📂 Repository Structure
+
+```
+.
+├── data/
+│   └── raw_bike_data.csv        # Raw dataset (not tracked by git — see Setup)
+├── notebooks/
+│   └── *.ipynb                  # Interactive EDA and experimentation
+├── src/
+│   ├── data.py                  # Data loading, cleaning, and feature engineering
+│   └── train.py                 # Pipelines, model training, tuning, and evaluation
+├── requirements.txt              # Pinned dependency versions
+├── .gitignore                    # Excludes venvs, caches, and raw data
+└── README.md
+```
+
+- **`data/`** — Holds raw input data locally. Raw CSVs are git-ignored to keep the repository lightweight and avoid committing large/sensitive files.
+- **`notebooks/`** — Space for exploratory data analysis (EDA) and ad-hoc experimentation, kept separate from production code.
+- **`src/`** — Core, reusable, importable logic. No notebook-only code lives here.
+
+---
+
+## ⚙️ Environment Setup
+
+### 1. Clone the repository
 ```bash
-python -m venv .venv
-source .venv/Scripts/activate
-
-python -m pip install -r requirements.txt
-python -m pip install -e .
-
-python scripts/local_identity.py init
+git clone <your-repo-url>
+cd <your-repo-name>
 ```
 
-The first installation command installs external dependencies.
-The second registers the local secure_agent package in editable mode.
-
-The initialization command creates .env with a generated JWT secret.
-It does not overwrite an existing .env.
-
-Select .venv/Scripts/python.exe as the interpreter in VS Code.
-
-## Ollama
-
-Make sure Ollama is installed and running.
-
-Download the configured model if needed:
-
+### 2. Create and activate a virtual environment
 ```bash
-ollama pull qwen2.5:7b-instruct
+python -m venv venv
+
+# macOS/Linux
+source venv/bin/activate
+
+# Windows
+venv\Scripts\activate
 ```
 
-If Ollama is not already running, start it in a separate terminal:
-
+### 3. Install dependencies
 ```bash
-ollama serve
+pip install -r requirements.txt
 ```
 
-## Start the application
+`requirements.txt` pins exact versions of **Pandas**, **NumPy**, **Scikit-Learn**, and visualization libraries to guarantee reproducible results across machines.
 
-```bash
-python -m secure_agent
-```
+### 4. `.gitignore` coverage
+The `.gitignore` is configured to strictly exclude:
+- Virtual environment directories (`venv/`, `.venv/`)
+- Python caches (`__pycache__/`, `*.pyc`)
+- Raw CSV data files (`data/*.csv`)
+- Notebook checkpoints (`.ipynb_checkpoints/`)
 
-Open http://127.0.0.1:8000/docs.
+---
 
-## Generate a token
+## 📥 Dataset
 
-Open another Git Bash terminal in the project root:
+This project uses the **[Bike Sharing Demand](https://www.kaggle.com/c/bike-sharing-demand/data)** dataset, originally published for a Kaggle competition. It contains two years of hourly rental logs from Capital Bikeshare, combined with weather and seasonal information.
 
-```bash
-source .venv/Scripts/activate
-python scripts/local_identity.py token
-```
+### Setup instructions
+1. Download `train.csv` from the Kaggle link above.
+2. Rename it to `raw_bike_data.csv`.
+3. Place it inside the `data/` folder:
+   ```
+   data/raw_bike_data.csv
+   ```
 
-Copy the token.
+### Feature Dictionary
 
-In the API documentation, click Authorize and paste only the token.
-Do not add the word Bearer.
-
-Tokens expire after 30 minutes by default.
-
-## Ask the agent
-
-Use POST /agent with:
-
-```json
-{
-  "prompt": "Find the price of product P100 and calculate the total for 3 units."
-}
-```
-
-The demo product costs INR 65,000.
-The total for three units is INR 195,000.
-
-Responses contain:
-
-- answer
-- tools_used
-- request_id
-
-The local model determines which tools it calls.
-
-## Project organization
-
-- config.py: environment settings and paths
-- __main__.py: application entry point
-- api.py: HTTP endpoints and request monitoring
-- agent.py: Ollama conversation and tool-calling loop
-- identity/tokens.py: JWT issuance and validation
-- authz/policies.py: role and tool permissions
-- gateway/router.py: MCP connection and authorized routing
-- mcp/server.py: MCP server registration
-- mcp/tools/: calculator and demo product tools
-- observability/logging.py: rotating JSON audit logs
-- observability/metrics.py: request and tool metrics
-- scripts/local_identity.py: configuration and token CLI
-- tests/: offline test suite with a fake Ollama server
-
-## Request flow
-
-1. FastAPI validates the JWT.
-2. The gateway discovers tools from a private MCP subprocess.
-3. Permitted tool schemas are passed to Ollama.
-4. Ollama requests a tool call.
-5. The gateway revalidates identity and checks permission.
-6. The MCP server executes the tool.
-7. The result returns to Ollama for the final answer.
-8. Logs and metrics record execution metadata.
-
-The MCP subprocess uses the same Python interpreter as the API.
-It communicates over stdio and has no network listener.
-
-## Roles
-
-| Role | Product lookup | Calculator | Metrics |
-|---|---|---|---|
-| reader | Yes | No | No |
-| operator | Yes | Yes | No |
-| admin | Yes | Yes | Yes |
-
-Examples:
-
-```bash
-python scripts/local_identity.py token --subject arshad --role reader
-python scripts/local_identity.py token --subject arshad --role admin
-```
-
-Token issuance is a trusted local operator command.
-Anyone with access to the signing secret can issue tokens.
-
-## Endpoints
-
-| Endpoint | Purpose |
-|---|---|
-| GET /health | API liveness |
-| GET /docs | Interactive API documentation |
-| POST /agent | Ask the agent |
-| GET /tools | List permitted tool schemas |
-| POST /tools/{name} | Execute a tool through the gateway |
-| GET /metrics | View metrics using an admin token |
-
-Example body for POST /tools/calculate:
-
-```json
-{
-  "arguments": {
-    "operation": "multiply",
-    "a": 12,
-    "b": 12
-  }
-}
-```
-
-MCP tool validation or execution errors appear as isError in the
-tool response. HTTP 200 alone does not mean the tool succeeded.
-
-## Logs and metrics
-
-Audit events are written to logs/audit.jsonl.
-
-Event types:
-
-| Event | Written when | Notable fields |
+| Feature | Data Type | Description |
 |---|---|---|
-| http_request | every request | route, status, duration_ms, subject, role, reason, cause |
-| auth_failure | a token is missing or rejected | reason, route, client |
-| tool_call | the gateway handles a tool call | subject, tool, outcome, reason, duration_ms |
-| request_error | an unhandled exception occurs | error_type |
+| `datetime` | String/Date | Hourly timestamp, e.g. `2011-01-01 00:00:00` |
+| `season` | Integer | 1 = Spring, 2 = Summer, 3 = Fall, 4 = Winter |
+| `holiday` | Integer | 1 if the day is a holiday, 0 otherwise |
+| `workingday` | Integer | 1 if neither a weekend nor a holiday, 0 otherwise |
+| `weather` | Integer | 1 = Clear/Few clouds, 2 = Mist/Cloudy, 3 = Light Snow/Rain, 4 = Heavy Rain/Ice/Thunderstorm |
+| `temp` | Float | Core temperature (°C) |
+| `atemp` | Float | "Feels like" temperature (°C) |
+| `humidity` | Float | Relative humidity (%) |
+| `windspeed` | Float | Wind speed |
+| `casual` | Integer | Non-registered user rentals *(dropped — leakage)* |
+| `registered` | Integer | Registered user rentals *(dropped — leakage)* |
+| `count` | Integer | **Target variable** — total rentals in that hour |
 
-subject and role are null when the request was not authenticated.
-reason explains a failed request. For 401 it is one of: missing_token,
-malformed_token, invalid_signature, invalid_algorithm, token_expired,
-invalid_audience, invalid_issuer, missing_claim, invalid_subject,
-invalid_role. For 403 it is missing_permission:<permission>. For
-other failures it is the error message returned to the caller.
-cause is the exception type behind a failure, such as ConnectError
-or ReadTimeout when Ollama is unreachable or slow.
+---
 
-HTTP responses stay generic for authentication failures. The
-specific reason is only written to the audit log and metrics.
+## 🧹 Data Engineering & Preprocessing (`src/data.py`)
 
-Tokens, prompts, tool arguments, and tool result contents are
-excluded from audit records.
-
-Logs rotate at 2 MB with three backups.
-
-The /metrics endpoint exposes HTTP and tool counts and duration.
-agent_auth_failures_total counts rejected tokens by reason.
-Metrics reset when the application restarts. Run one API worker.
-
-## Configuration
-
-Settings load from the project root .env.
-
-| Setting | Purpose |
+| Step | Description |
 |---|---|
-| JWT_SECRET | Signing secret |
-| JWT_EXPIRY_MINUTES | Token lifetime |
-| OLLAMA_URL | Ollama address |
-| OLLAMA_MODEL | Installed tool-capable model |
-| MAX_AGENT_STEPS | Maximum model rounds |
-| OLLAMA_TIMEOUT_SECONDS | Ollama HTTP client timeout |
-| MCP_TIMEOUT_SECONDS | MCP request timeout |
+| **Temporal feature extraction** | Parses the raw `datetime` string into explicit `hour`, `dayofweek`, and `month` features to help models capture commuter/seasonal cycles. |
+| **Sensor anomaly guardrails** | Clips continuous weather variables (`temp`, `atemp`, `humidity`, `windspeed`) at a lower bound of `0` to automatically correct implausible negative sensor readings. |
+| **Leakage prevention** | Strictly drops `casual` and `registered` before the train/test split, since these two columns sum directly to the target (`count`) and would leak the answer to the model. |
+| **Automated EDA** | The `perform_eda()` function prints dataset shape, central tendency statistics, and key linear correlations (e.g., temperature vs. total count) to the terminal during data loading, giving an instant sanity check on every run. |
 
-Timeouts apply to backend requests, not to the entire agent operation.
+---
 
-## Troubleshooting
+## 🤖 Machine Learning Pipelines & Modeling (`src/train.py`)
 
-- 401: token missing, invalid, or expired. The audit log
-  auth_failure event gives the exact reason.
-- 403: the current role lacks permission. The reason field names
-  the missing permission.
-- 502: check Ollama and model installation. The reason and cause
-  fields of the http_request event show what failed.
-- 504: Ollama exceeded its configured timeout.
-- ModuleNotFoundError: activate .venv and run
-  python -m pip install -e .
-- Existing .env: initialization preserves it; edit it manually.
+| Component | Description |
+|---|---|
+| **`ColumnTransformer`** | Applies `StandardScaler` exclusively to continuous features (`temp`, `atemp`, `humidity`, `windspeed`), leaving categorical and temporal features (`season`, `weather`, `hour`, `dayofweek`, `month`, etc.) untouched. |
+| **`Pipeline` encapsulation** | Bundles preprocessing and modeling into a single Scikit-Learn `Pipeline`, guaranteeing that scaling statistics are fit **only** on training folds — preventing leakage during cross-validation. |
+| **Linear baseline** | A fast `LinearRegression` pipeline establishes an interpretable performance floor. |
+| **Random Forest** | A `RandomForestRegressor` pipeline captures non-linear interactions between weather, time, and commuter behavior. |
+| **Hyperparameter tuning** | `RandomizedSearchCV` efficiently searches combinations of `n_estimators` and `max_depth` using 2-fold cross-validation. |
 
-## Tests
+---
+
+## 📊 Evaluation Strategy
+
+Both the linear baseline and the tuned Random Forest are benchmarked against a **20% holdout test set** (never seen during training or tuning), using:
+
+- **MAE** (Mean Absolute Error) — average magnitude of prediction error, in rental counts.
+- **RMSE** (Root Mean Squared Error) — penalizes larger errors more heavily than MAE.
+- **R²** (Coefficient of Determination) — proportion of variance in demand explained by the model.
+
+---
+
+## ▶️ Usage
 
 ```bash
-python -m pip install -e ".[dev]"
-python -m pytest
+# Run data loading + EDA
+python src/data.py
+
+# Train, tune, and evaluate models
+python src/train.py
 ```
 
-The suite needs no Ollama installation. It starts a fake Ollama
-server to exercise the agent loop, covers authentication failures,
-role permissions, gateway enforcement, error mapping, audit
-content, and metrics, and writes audit records to a temporary
-directory. It tests the plumbing, not the quality of a real model.
+Expected console output includes dataset shape/statistics during the data phase, followed by MAE, RMSE, and R² for both the linear and Random Forest models on the holdout set.
 
-## Scope
+---
 
-The project runs locally using Ollama and locally issued JWT tokens.
+## 🛠️ Tech Stack
 
-Product records are fixed demo data.
-No AWS services, database, OIDC provider, Docker deployment,
-or distributed tracing is configured.
+- **Python 3.x**
+- **Pandas** / **NumPy** — data manipulation
+- **Scikit-Learn** — pipelines, preprocessing, modeling, cross-validation
+- **Matplotlib / Seaborn** (or equivalent) — visualization
+
+---
+
+## 📈 Potential Next Steps
+
+- Add cyclical encoding (sine/cosine) for `hour` and `month` instead of raw integers.
+- Experiment with gradient boosting models (XGBoost, LightGBM).
+- Expand hyperparameter search space and increase CV folds once compute allows.
+- Add a `predict.py` script for scoring new/unseen data with the saved model artifact.
+
+---
+
+## 📄 License
+
+Specify your license here (e.g., MIT).
